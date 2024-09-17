@@ -9,13 +9,16 @@ async function addChainsToTokens() {
   try {
     for (let citizenId = 1; citizenId <= 20000; citizenId++) {
       for (const chain of CHAINS) {
-        // Get 100 tokens for this citizen that don't have a chain assigned
+        // Get 100 tokens for this citizen
         const tokens = await prisma.citizenTokens.findMany({
           where: {
             citizenId: citizenId,
-            // chain: null,
           },
           take: TOKENS_PER_CHAIN,
+          orderBy: {
+            id: 'asc',
+          },
+          skip: CHAINS.indexOf(chain) * TOKENS_PER_CHAIN,
         });
 
         // Update these tokens with the current chain
