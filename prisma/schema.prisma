@@ -1,19 +1,575 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
+model AdminUsers {
+  id                 Int      @id @default(autoincrement())
+  email              String   @unique @db.VarChar(255)
+  password           String?  @db.VarChar(255)
+  role               String?  @db.VarChar(255)
+  status             String?  @db.VarChar(255)
+  profilePicUrl      String?  @db.VarChar(255)
+  resetPasswordToken String?  @db.VarChar(255)
+  firstName          String?  @db.VarChar(255)
+  lastName           String?  @db.VarChar(255)
+  secretKey          String?  @db.VarChar(255)
+  is2Fa              Boolean?
+  authCode           Int?
+  isBlocked          Boolean  @default(false)
+  isDeleted          Boolean  @default(false)
+  isScan             Boolean  @default(false)
+  createdAt          DateTime @db.Timestamptz(6)
+  updatedAt          DateTime @db.Timestamptz(6)
+  is2faToken         String?  @db.VarChar(255)
+}
+
+model CardPayments {
+  id              BigInt          @id @default(autoincrement())
+  idempotencyKey  String?         @db.VarChar(255)
+  paymentId       String?         @db.VarChar(255)
+  citizenId       BigInt?
+  cardId          BigInt?
+  amount          String?         @db.VarChar(255)
+  currency        String?         @db.VarChar(255)
+  status          String?         @db.VarChar(255)
+  paymentType     String?         @db.VarChar(255)
+  errorCode       String?         @db.VarChar(255)
+  createdAt       DateTime        @db.Timestamptz(6)
+  updatedAt       DateTime        @db.Timestamptz(6)
+  deletedAt       DateTime?       @db.Timestamptz(6)
+  citizenWalletId BigInt?
+  settlementId    String?         @db.VarChar(255)
+  CitizenCards    CitizenCards?   @relation(fields: [cardId], references: [id], onDelete: NoAction)
+  Citizens        Citizens?       @relation(fields: [citizenId], references: [id], onDelete: NoAction)
+  CitizenWallets  CitizenWallets? @relation(fields: [citizenWalletId], references: [id], onDelete: NoAction)
+  Orders          Orders[]
+}
+
+model Categories {
+  id          Int          @id @default(autoincrement())
+  name        String?      @db.VarChar(255)
+  description String?      @db.VarChar(255)
+  isDeleted   Boolean      @default(false)
+  createdAt   DateTime     @db.Timestamptz(6)
+  updatedAt   DateTime     @db.Timestamptz(6)
+  Properties  Properties[]
+}
+
+model CitizenCards {
+  id              BigInt          @id @default(autoincrement())
+  type            String?         @db.VarChar(255)
+  idempotencyKey  String?         @db.VarChar(255)
+  cardIdentifier  String?         @db.VarChar(255)
+  citizenId       BigInt?
+  last4CardNo     String?         @db.VarChar(255)
+  binNo           String?         @db.VarChar(255)
+  network         String?         @db.VarChar(255)
+  fundingType     String?         @db.VarChar(255)
+  status          String?         @db.VarChar(255)
+  createdAt       DateTime        @db.Timestamptz(6)
+  updatedAt       DateTime        @db.Timestamptz(6)
+  deletedAt       DateTime?       @db.Timestamptz(6)
+  citizenWalletId BigInt?
+  CardPayments    CardPayments[]
+  Citizens        Citizens?       @relation(fields: [citizenId], references: [id], onDelete: NoAction)
+  CitizenWallets  CitizenWallets? @relation(fields: [citizenWalletId], references: [id], onDelete: NoAction)
+
+  @@index([citizenId, status, id], map: "citizen_cards_citizen_id_status_id")
+}
+
+model CitizenWallets {
+  id                                          BigInt                          @id @default(autoincrement())
+  citizenId                                   BigInt?
+  cardId                                      BigInt?
+  walletAddress                               String                          @unique @db.VarChar(255)
+  walletType                                  enum_CitizenWallets_walletType?
+  isActive                                    Boolean                         @default(true)
+  createdAt                                   DateTime                        @db.Timestamptz(6)
+  updatedAt                                   DateTime                        @db.Timestamptz(6)
+  deletedAt                                   DateTime?                       @db.Timestamptz(6)
+  CardPayments                                CardPayments[]
+  CitizenCards                                CitizenCards[]
+  Citizens_CitizenWallets_cardIdToCitizens    Citizens?                       @relation("CitizenWallets_cardIdToCitizens", fields: [cardId], references: [id], onDelete: NoAction)
+  Citizens_CitizenWallets_citizenIdToCitizens Citizens?                       @relation("CitizenWallets_citizenIdToCitizens", fields: [citizenId], references: [id], onDelete: NoAction)
+  Orders                                      Orders[]
+  csvData                                     csvData[]
+
+  @@index([walletAddress], map: "citizen_wallets_wallet_address")
+}
+
+model Citizens {
+  id                                                BigInt                   @id @default(autoincrement())
+  firstName                                         String?                  @db.VarChar(255)
+  lastName                                          String?                  @db.VarChar(255)
+  userName                                          String?                  @db.VarChar(255)
+  email                                             String?                  @unique @db.VarChar(255)
+  profilePicUrl                                     String?                  @db.VarChar(255)
+  publicAddress                                     String?                  @unique @db.VarChar(255)
+  loginType                                         enum_Citizens_loginType?
+  isBlocked                                         Boolean                  @default(false)
+  isVerified                                        Boolean                  @default(false)
+  createdAt                                         DateTime                 @db.Timestamptz(6)
+  updatedAt                                         DateTime                 @db.Timestamptz(6)
+  deletedAt                                         DateTime?                @db.Timestamptz(6)
+  idGenerated                                       Boolean?                 @default(false)
+  idNumber                                          Int?                     @unique
+  password                                          String?                  @db.VarChar(255)
+  otp                                               String?                  @db.VarChar(255)
+  nuggetClaimAvailable                              Int                      @default(0)
+  twitterUsername                                   String?                  @db.VarChar(255)
+  twitterId                                         BigInt?
+  phoneNumber                                       String?                  @unique @db.VarChar(255)
+  isPhoneVerified                                   Boolean                  @default(false)
+  isEmailOptedIn                                    Boolean                  @default(false)
+  didGiveReferralBonus                              Boolean                  @default(false)
+  referralId                                        Int?
+  bannedFromAuction                                 Boolean                  @default(false)
+  discordUsername                                   String?                  @db.VarChar(255)
+  discordId                                         String?                  @db.VarChar(255)
+  pendingRewardsClaimed                             Int[]                    @default([])
+  acceptedTerms                                     Boolean                  @default(false)
+  referredBy                                        Citizens?                @relation("Referral", fields: [referralId], references: [idNumber])
+  referrals                                         Citizens[]               @relation("Referral")
+  CardPayments                                      CardPayments[]
+  CitizenCards                                      CitizenCards[]
+  CitizenWallets_CitizenWallets_cardIdToCitizens    CitizenWallets[]         @relation("CitizenWallets_cardIdToCitizens")
+  CitizenWallets_CitizenWallets_citizenIdToCitizens CitizenWallets[]         @relation("CitizenWallets_citizenIdToCitizens")
+  GoldNuggets                                       GoldNuggets[]
+  Orders                                            Orders[]
+  csvData                                           csvData[]
+  // bids                                              Bids[]
+  tweetClaims                                       CitizenTweetClaims[]
+  isEarnAllianceCampaign                            Boolean                  @default(false)
+  properties                                        Properties[]
+  bids                                              BidV2[]
+  winningLots                                       LotV2[]                  @relation("WinningBid")
+  Bids                                              Bids[]
+
+  @@index([email], map: "citizens_email")
+  @@index([publicAddress], map: "citizens_public_address")
+}
+
+model PendingRewards {
+  id            Int      @id @default(autoincrement())
+  walletAddress String?
+  discordId     String?
+  nuggetClaims  Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ExchangeRates {
+  id             Int       @id @default(autoincrement())
+  propertySymbol String?   @default("USD") @db.VarChar(24)
+  propertyName   String?   @default("usd") @db.VarChar(24)
+  amount         Int?      @default(1)
+  exchangeRate   Float?
+  convert        String?   @default("ethereum") @db.VarChar(85)
+  convertSymbol  String?   @default("ETH") @db.VarChar(85)
+  lastUpdated    DateTime? @db.Timestamptz(6)
+  apiId          Int?
+  createdAt      DateTime  @db.Timestamptz(6)
+  updatedAt      DateTime  @db.Timestamptz(6)
+  lrcPrice       Float?
+}
+
+model Orders {
+  id                        BigInt                   @id @default(autoincrement())
+  nftId                     String?                  @db.VarChar(255)
+  citizenId                 BigInt?
+  citizenWalletId           BigInt?
+  propertyId                Int?
+  amountInUSD               Float?
+  amountInETH               Float?
+  paymentType               enum_Orders_paymentType?
+  status                    enum_Orders_status?
+  blockchainTransactionHash String?                  @db.VarChar(255)
+  paymentTransactionHash    String?                  @db.VarChar(255)
+  receiverAddress           String?                  @db.VarChar(255)
+  createdAt                 DateTime                 @db.Timestamptz(6)
+  updatedAt                 DateTime                 @db.Timestamptz(6)
+  deletedAt                 DateTime?                @db.Timestamptz(6)
+  circlePaymentId           BigInt?
+  fromAddress               String?                  @db.VarChar(255)
+  isLrc                     Boolean?
+  blockchainTransactionUrl  String?                  @db.VarChar(255)
+  amountInLRC               Float?
+  CardPayments              CardPayments?            @relation(fields: [circlePaymentId], references: [id], onDelete: NoAction)
+  Citizens                  Citizens?                @relation(fields: [citizenId], references: [id], onDelete: NoAction)
+  CitizenWallets            CitizenWallets?          @relation(fields: [citizenWalletId], references: [id], onDelete: NoAction)
+  csvData                   csvData?                 @relation(fields: [propertyId], references: [id], onDelete: NoAction)
+
+  @@index([status, citizenWalletId], map: "orders_status_citizen_wallet_id")
+}
+
+model Properties {
+  id                  Int                     @id @default(autoincrement())
+  name                String?                 @db.VarChar(255)
+  description         String?
+  shortDescription    String?
+  mainPropertyUrl     String?                 @db.VarChar(255)
+  mainPropertylpfsUrl String?                 @db.VarChar(255)
+  mainPropertyType    String?                 @db.VarChar(255)
+  categoryId          Int?
+  subcategoryId       Int?
+  currencyId          Int?
+  salePrice           Float
+  isSold              Boolean?                @default(false)
+  status              enum_Properties_status? @default(active)
+  nftId               String?                 @db.VarChar(255)
+  createdAt           DateTime                @db.Timestamptz(6)
+  updatedAt           DateTime                @db.Timestamptz(6)
+  deletedAt           DateTime?               @db.Timestamptz(6)
+  metaDataHash        String?                 @db.VarChar(255)
+  citizenId           BigInt?
+  isQuantifiable      Boolean                 @default(false)
+  quantity            Int                     @default(1)
+  citizen             Citizens?               @relation(fields: [citizenId], references: [id])
+  Categories          Categories?             @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([isSold, status], map: "properties_is_sold_status")
+  @@index([citizenId])
+}
+
+model PropertyCharacteristics {
+  id            Int      @id @default(autoincrement())
+  propertyId    BigInt?
+  ipfsHash      String   @db.VarChar(255)
+  landScouted   String   @db.VarChar(255)
+  rank          String   @default("Private") @db.VarChar(255)
+  speed         String   @db.VarChar(255)
+  specialSkills String   @default(dbgenerated("0")) @db.VarChar(255)
+  equipment     String   @default(dbgenerated("0")) @db.VarChar(255)
+  createdAt     DateTime @db.Timestamptz(6)
+  updatedAt     DateTime @db.Timestamptz(6)
+}
+
+model PropertyMediaFiles {
+  id                 Int       @id @default(autoincrement())
+  propertyId         BigInt?
+  filePath           String?   @db.VarChar(255)
+  fileType           String?   @db.VarChar(10)
+  isMainPropertyFile Boolean
+  createdAt          DateTime  @db.Timestamptz(6)
+  updatedAt          DateTime  @db.Timestamptz(6)
+  deletedAt          DateTime? @db.Timestamptz(6)
+}
+
+model SequelizeData {
+  name String @id @db.VarChar(255)
+}
+
+model SequelizeMeta {
+  name String @id @db.VarChar(255)
+}
+
+model SiteVisitors {
+  id          BigInt    @id @default(autoincrement())
+  ipAddress   String?   @db.VarChar(255)
+  latitude    Float?
+  longitude   Float?
+  timezone    String?   @db.VarChar(255)
+  countryCode String?   @db.Char(3)
+  country     String?   @db.VarChar(255)
+  createdAt   DateTime  @db.Timestamptz(6)
+  updatedAt   DateTime  @db.Timestamptz(6)
+  deletedAt   DateTime? @db.Timestamptz(6)
+}
+
+model SubCategories {
+  id         Int      @id @default(autoincrement())
+  name       String?  @db.VarChar(255)
+  categoryId Int?
+  isDeleted  Boolean? @default(false)
+  createdAt  DateTime @db.Timestamptz(6)
+  updatedAt  DateTime @db.Timestamptz(6)
+}
+
+model csvData {
+  id                  Int                       @id @default(autoincrement())
+  name                String?                   @db.VarChar(255)
+  description         String?
+  shortDescription    String?
+  mainPropertyUrl     String?                   @db.VarChar(255)
+  mainPropertylpfsUrl String?                   @db.VarChar(255)
+  mainPropertyType    String?                   @db.VarChar(255)
+  salePrice           Float
+  isSold              Boolean?                  @default(false)
+  nftId               String?                   @db.VarChar(255)
+  ipfsHash            String                    @db.VarChar(255)
+  landScouted         String                    @db.VarChar(255)
+  rank                String                    @default("Private") @db.VarChar(255)
+  speed               String                    @db.VarChar(255)
+  specialSkills       String                    @default(dbgenerated("0")) @db.VarChar(255)
+  equipment           String                    @default(dbgenerated("0")) @db.VarChar(255)
+  createdAt           DateTime                  @db.Timestamptz(6)
+  updatedAt           DateTime                  @db.Timestamptz(6)
+  citizenWalletId     BigInt?
+  citizenId           BigInt?
+  metaDataHash        String?                   @db.VarChar(255)
+  status              enum_csvData_status?      @default(active)
+  blockStatus         enum_csvData_blockStatus? @default(yet_to_mint)
+  type                String?                   @db.VarChar(255)
+  subType             String?                   @db.VarChar(255)
+  level               String?                   @db.VarChar(255)
+  region              String?                   @db.VarChar(255)
+  location            String?                   @db.VarChar(255)
+  Orders              Orders[]
+  Citizens            Citizens?                 @relation(fields: [citizenId], references: [id], onDelete: NoAction)
+  CitizenWallets      CitizenWallets?           @relation(fields: [citizenWalletId], references: [id], onDelete: NoAction)
+}
+
+model shipDetails {
+  id                Int                         @id @default(autoincrement())
+  shipName          String?                     @db.VarChar(255)
+  shipStatus        enum_shipDetails_shipStatus @default(active)
+  startDate         DateTime?                   @db.Timestamptz(6)
+  endDate           DateTime?                   @db.Timestamptz(6)
+  propertySoldCount Int?
+  lotLimit          Int?
+  createdAt         DateTime                    @db.Timestamptz(6)
+  updatedAt         DateTime                    @db.Timestamptz(6)
+}
+
+model shipLots {
+  id           Int      @id @default(autoincrement())
+  shipName     String?  @db.VarChar(255)
+  propertyId   Int?
+  saleStatus   String?  @db.VarChar(255)
+  propertyName String?  @db.VarChar(255)
+  lotId        Int?
+  createdAt    DateTime @db.Timestamptz(6)
+  updatedAt    DateTime @db.Timestamptz(6)
+}
+
+model Auctions {
+  id        Int       @id @default(autoincrement())
+  status    String
+  startTime DateTime?
+  endTime   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  bids      Bids[]
+  lots      Lot[]
+}
+
+model Lot {
+  id        Int      @id @default(autoincrement())
+  position  Int
+  prize     String
+  auction   Auctions @relation(fields: [auctionId], references: [id])
+  auctionId Int
+
+  @@index([auctionId])
+}
+
+model Bids {
+  id        Int      @id @default(autoincrement())
+  auctionId Int
+  citizenId BigInt
+  nuggetIds Int[]
+  totalBid  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  auction   Auctions @relation(fields: [auctionId], references: [id])
+  citizen   Citizens @relation(fields: [citizenId], references: [id])
+}
+
+model GrandAuctionV2 {
+  id        Int      @id @default(autoincrement())
+  startTime DateTime
+  endTime   DateTime
+  status    String   @default("PENDING") // PENDING, ACTIVE, ENDED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lots      LotV2[]
+  bids      BidV2[]
+}
+
+model LotV2 {
+  id               Int            @id @default(autoincrement())
+  grandAuctionId   Int
+  grandAuction     GrandAuctionV2 @relation(fields: [grandAuctionId], references: [id])
+  itemName         String
+  description      String?
+  startingPrice    Float
+  currentPrice     Float
+  winningBidId     Int?           @unique
+  winningBid       BidV2?         @relation("WinningBid", fields: [winningBidId], references: [id])
+  winningCitizenId BigInt?
+  winningCitizen   Citizens?      @relation("WinningBid", fields: [winningCitizenId], references: [id])
+  status           String         @default("ACTIVE")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  bids             BidV2[]
+
+  @@map("LotV2")
+}
+
+model BidV2 {
+  id             Int            @id @default(autoincrement())
+  grandAuctionId Int
+  grandAuction   GrandAuctionV2 @relation(fields: [grandAuctionId], references: [id])
+  lotId          Int
+  lot            LotV2          @relation(fields: [lotId], references: [id])
+  citizenId      BigInt
+  citizen        Citizens       @relation(fields: [citizenId], references: [id])
+  amount         Float
+  bidIncrement   Float          @default(0)
+  status         String         @default("ACTIVE") // ACTIVE, REFUNDED
+  chain          String
+  txHash         String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  winningLot     LotV2?         @relation("WinningBid")
+
+  @@map("BidV2")
+}
+
+model GoldNuggets {
+  nuggetId  Int       @id(map: "goldnuggets_pkey") @default(autoincrement())
+  citizenId BigInt
+  claimedAt DateTime? @default(now()) @db.Timestamp(6)
+  locked    Boolean   @default(false)
+  Citizens  Citizens  @relation(fields: [citizenId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "goldnuggets_citizenid_fkey")
+}
+
+model ProspectorTweets {
+  id        Int                  @id @default(autoincrement())
+  tweetId   String               @unique
+  nuggets   Int
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  claimedBy CitizenTweetClaims[]
+}
+
+model CitizenTweetClaims {
+  id        Int              @id @default(autoincrement())
+  citizenId BigInt
+  tweetId   String
+  claimedAt DateTime         @default(now())
+  citizen   Citizens         @relation(fields: [citizenId], references: [id])
+  tweet     ProspectorTweets @relation(fields: [tweetId], references: [tweetId])
+
+  @@unique([citizenId, tweetId])
+}
+
+model Tweets {
+  id              Int      @id @default(autoincrement())
+  tweetId         String   @unique
+  inReplyToUserId String?
+  mediaUrl        String?
+  mediaType       String?
+  isEligible      Boolean
+  used            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model EligibleTweets {
+  id               Int      @id @default(autoincrement())
+  tweetId          String   @unique
+  authorId         String
+  inReplyToTweetId String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model EligibleTicketTweets {
+  id               Int      @id @default(autoincrement())
+  tweetId          String   @unique
+  authorId         String
+  inReplyToTweetId String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model MonitoredTweet {
+  id        Int      @id @default(autoincrement())
+  tweetId   String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model CitizenTokens {
   id        Int      @id @default(autoincrement())
   citizenId Int
   token     String
+  chain     String   // New column added
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("CitizenTokens")
+}
+
+enum enum_CitizenWallets_walletType {
+  Email
+  Metamask
+  Wallet_Connect @map("Wallet Connect")
+  GameStop
+  Wallet
+}
+
+enum enum_Citizens_loginType {
+  Email
+  Metamask
+  Wallet_Connect @map("Wallet Connect")
+  GameStop
+  Wallet
+}
+
+enum enum_Orders_paymentType {
+  Circle
+  Metamask
+  Wallet_Connect @map("Wallet Connect")
+  GameStop
+  Wallet
+}
+
+enum enum_Orders_status {
+  pending
+  payment_initiated
+  payment_completed
+  minting_inprogress
+  minting_completed
+  minting_failed
+  payment_failed
+  failed
+}
+
+enum enum_Properties_status {
+  active
+  pending
+  payment_initiated
+  payment_completed
+  minting_inprogress
+  minting_completed
+}
+
+enum enum_csvData_blockStatus {
+  yet_to_mint
+  minting_completed
+  transfer_completed
+}
+
+enum enum_csvData_status {
+  active
+  pending
+  payment_initiated
+  payment_completed
+  minting_inprogress
+  minting_completed
+}
+
+enum enum_shipDetails_shipStatus {
+  active
+  onsale
+  completed
+  next
 }

@@ -5,6 +5,7 @@ const { MerkleTree } = require('merkletreejs');
 const { keccak256 } = require('ethereumjs-util');
 const { PrismaClient } = require('@prisma/client');
 const { ethers } = require('ethers');
+const net = require('net');
 
 const app = express();
 const prisma = new PrismaClient({
@@ -15,10 +16,9 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
-let merkleTree;
-let rootHash;
+let merkleTrees = {};
+let rootHashes = {};
 
-// Update the hashToken function
 function hashToken(token, citizenId) {
   return ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
@@ -28,77 +28,71 @@ function hashToken(token, citizenId) {
   );
 }
 
-async function fetchTokensBatch(lastId, batchSize, retries = 3) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await prisma.citizenTokens.findMany({
+async function generateMerkleTreesByChain() {
+  console.log('Starting Merkle tree generation for each chain...');
+  const CHAINS = ['ETH', 'ARB', 'BASE', 'POL', 'AVAX'];
+  const merkleTrees = {};
+  const rootHashes = {};
+
+  await Promise.all(CHAINS.map(async (chain) => {
+    console.log(`Generating Merkle tree for chain: ${chain}`);
+    const batchSize = 100000; // Reduced batch size
+    let lastId = 0;
+    let processedCount = 0;
+    const totalTokens = await prisma.citizenTokens.count({
+      where: { chain },
+    });
+    console.log(`Total tokens for ${chain}: ${totalTokens}`);
+
+    const treeBuilder = new MerkleTree([], keccak256, { sortPairs: true });
+
+    while (processedCount < totalTokens) {
+      const tokens = await prisma.citizenTokens.findMany({
         take: batchSize,
         where: {
-          id: { gt: lastId }
+          id: { gt: lastId },
+          chain: chain,
         },
         select: { id: true, token: true, citizenId: true },
         orderBy: { id: 'asc' },
       });
-    } catch (error) {
-      console.error(`Database fetch attempt ${attempt} failed:`, error);
-      if (attempt === retries) throw error;
-      await new Promise(resolve => setTimeout(resolve, 5000 * attempt)); // Exponential backoff
-    }
-  }
-}
-
-async function generateMerkleTree() {
-  console.log("Starting Merkle tree generation...");
-  const batchSize = 100000; // Increased batch size for faster processing
-  let lastId = 0;
-  let processedCount = 0;
-  const totalTokens = await prisma.citizenTokens.count();
-  console.log(`Total tokens to process: ${totalTokens}`);
-
-  console.time("Tree Generation");
-
-  let treeBuilder = new MerkleTree([], keccak256, { sortPairs: true });
-
-  while (processedCount < totalTokens) {
-    try {
-      console.time(`Batch ${Math.floor(processedCount / batchSize) + 1}`);
-      const tokens = await fetchTokensBatch(lastId, Math.min(batchSize, totalTokens - processedCount));
-      console.timeEnd(`Batch ${Math.floor(processedCount / batchSize) + 1}`);
 
       if (tokens.length === 0) break;
 
-      const leaves = tokens.map(token => 
+      const leaves = tokens.map((token) =>
         hashToken(token.token.toString(), token.citizenId.toString())
       );
+
       treeBuilder.addLeaves(leaves);
 
       processedCount += tokens.length;
       lastId = tokens[tokens.length - 1].id;
 
-      console.log(`Processed ${processedCount}/${totalTokens} tokens.`);
-      console.log(`Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`);
-
-      await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between batches
-    } catch (error) {
-      console.error("Error processing batch:", error);
-      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds before retrying
+      console.log(
+        `Processed ${processedCount}/${totalTokens} tokens for ${chain}.`
+      );
     }
-  }
 
-  console.timeEnd("Tree Generation");
+    const rootHash = treeBuilder.getHexRoot();
 
-  console.log("Finalizing Merkle tree...");
-  merkleTree = treeBuilder;
-  rootHash = merkleTree.getHexRoot();
-  console.log("Merkle tree generated. Root:", rootHash);
+    merkleTrees[chain] = treeBuilder;
+    rootHashes[chain] = rootHash;
+
+    console.log(`Merkle tree for ${chain} generated. Root hash: ${rootHash}`);
+  }));
+
+  return { merkleTrees, rootHashes };
 }
 
-app.get('/proof/:citizenId/:token', async (req, res) => {
-  const { citizenId, token } = req.params;
+app.get('/proof/:chain/:citizenId/:token', async (req, res) => {
+  const { chain, citizenId, token } = req.params;
 
-  if (!merkleTree) {
-    return res.status(503).json({ error: "Merkle tree not yet generated" });
+  if (!merkleTrees[chain]) {
+    return res.status(400).json({ error: `Invalid or unsupported chain: ${chain}` });
   }
+
+  const merkleTree = merkleTrees[chain];
+  const rootHash = rootHashes[chain];
 
   const leaf = hashToken(token, citizenId);
   const proof = merkleTree.getHexProof(leaf);
@@ -106,31 +100,59 @@ app.get('/proof/:citizenId/:token', async (req, res) => {
   res.json({
     token,
     merkleProof: proof,
-    rootHash
+    rootHash,
   });
 });
 
-app.get('/rootHash', (req, res) => {
-  if (!rootHash) {
-    return res.status(503).json({ error: "Root hash not yet generated" });
+app.get('/rootHash/:chain', (req, res) => {
+  const { chain } = req.params;
+
+  if (!rootHashes[chain]) {
+    return res.status(400).json({ error: `Invalid or unsupported chain: ${chain}` });
   }
-  res.json({ rootHash });
+
+  res.json({ rootHash: rootHashes[chain] });
 });
 
 app.get('/', (req, res) => {
   res.json({ status: 'OK', message: 'Server is healthy' });
 });
 
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      resolve(false);
+    });
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+    server.listen(port);
+  });
+}
 
 async function startServer() {
+  const startTime = Date.now();
   try {
-    console.log("Starting server initialization...");
-    await generateMerkleTree();
+    console.log('Checking if port is available...');
+    const portAvailable = await isPortAvailable(PORT);
+    if (!portAvailable) {
+      throw new Error(`Port ${PORT} is not available. Please choose a different port.`);
+    }
+
+    console.log('Starting server initialization...');
+    const { merkleTrees: generatedMerkleTrees, rootHashes: generatedRootHashes } = await generateMerkleTreesByChain();
+    merkleTrees = generatedMerkleTrees;
+    rootHashes = generatedRootHashes;
     app.listen(PORT, () => {
+      const endTime = Date.now();
+      const startupTime = (endTime - startTime) / 60000; // Convert to minutes
       console.log(`Merkle proof server running on port ${PORT}`);
+      console.log(`Server startup took ${startupTime.toFixed(2)} minutes`);
     });
   } catch (error) {
-    console.error("Failed to start server:", error);
+    console.error('Failed to start server:', error);
     await prisma.$disconnect();
     process.exit(1);
   }
