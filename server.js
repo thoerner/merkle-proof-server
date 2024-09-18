@@ -34,9 +34,9 @@ async function generateMerkleTreesByChain() {
   const merkleTrees = {};
   const rootHashes = {};
 
-  for (const chain of CHAINS) {
+  await Promise.all(CHAINS.map(async (chain) => {
     console.log(`Generating Merkle tree for chain: ${chain}`);
-    const batchSize = 50000; // Reduced batch size
+    const batchSize = 100000; // Increased batch size
     let lastId = 0;
     let processedCount = 0;
     const totalTokens = await prisma.citizenTokens.count({
@@ -84,7 +84,7 @@ async function generateMerkleTreesByChain() {
     rootHashes[chain] = rootHash;
 
     console.log(`Merkle tree for ${chain} generated. Root hash: ${rootHash}`);
-  }
+  }));
 
   return { merkleTrees, rootHashes };
 }
