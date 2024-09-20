@@ -92,12 +92,14 @@ async function generateMerkleTreesByChain() {
 app.get('/proof/:chain/:citizenId/:token', async (req, res) => {
   const { chain, citizenId, token } = req.params;
 
-  if (!merkleTrees[chain]) {
+  const correctedChain = chain === "TEST" ? "POL" : chain;
+
+  if (!merkleTrees[correctedChain]) {
     return res.status(400).json({ error: `Invalid or unsupported chain: ${chain}` });
   }
 
-  const merkleTree = merkleTrees[chain];
-  const rootHash = rootHashes[chain];
+  const merkleTree = merkleTrees[correctedChain];
+  const rootHash = rootHashes[correctedChain];
 
   const leaf = hashToken(token, citizenId);
   const proof = merkleTree.getHexProof(leaf);
