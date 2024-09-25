@@ -18,6 +18,8 @@ const PORT = process.env.PORT || 3000;
 
 let merkleTrees = {};
 let rootHashes = {};
+let regenerationComplete = false;
+let isRegenerating = false;
 
 function hashToken(token, citizenId) {
   return ethers.keccak256(
@@ -89,6 +91,30 @@ async function generateMerkleTreesByChain() {
   return { merkleTrees, rootHashes };
 }
 
+app.post('/regenerate-trees', async (req, res) => {
+  console.log('Starting Merkle tree regeneration...');
+  try {
+    // Discard old trees
+    merkleTrees = {};
+    rootHashes = {};
+
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
+    }
+
+    // Generate new trees
+    const result = await generateMerkleTreesByChain();
+    merkleTrees = result.merkleTrees;
+    rootHashes = result.rootHashes;
+
+    res.json({ message: 'Merkle trees regenerated successfully', rootHashes });
+  } catch (error) {
+    console.error('Error regenerating Merkle trees:', error);
+    res.status(500).json({ error: 'Failed to regenerate Merkle trees' });
+  }
+});
+
 app.get('/proof/:chain/:citizenId/:token', async (req, res) => {
   const { chain, citizenId, token } = req.params;
 
@@ -119,6 +145,17 @@ app.get('/rootHash/:chain', (req, res) => {
   }
 
   res.json({ rootHash: rootHashes[chain] });
+});
+
+app.get('/regeneration-status', (req, res) => {
+  res.json({ isComplete: regenerationComplete });
+});
+
+app.get('/root-hashes', (req, res) => {
+  if (!regenerationComplete) {
+    return res.status(400).json({ message: 'Tree regeneration not complete' });
+  }
+  res.json({ rootHashes });
 });
 
 app.get('/', (req, res) => {
