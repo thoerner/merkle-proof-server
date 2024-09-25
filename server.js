@@ -94,9 +94,11 @@ async function generateMerkleTreesByChain() {
 app.post('/regenerate-trees', async (req, res) => {
   console.log('Starting Merkle tree regeneration...');
   if (isRegenerating) {
+    console.log('Regeneration already in progress');
     return res.status(409).json({ error: 'Regeneration already in progress' });
   }
   try {
+    console.log('Regeneration started');
     isRegenerating = true;
     regenerationComplete = false;
 
