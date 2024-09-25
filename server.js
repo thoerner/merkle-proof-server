@@ -93,7 +93,13 @@ async function generateMerkleTreesByChain() {
 
 app.post('/regenerate-trees', async (req, res) => {
   console.log('Starting Merkle tree regeneration...');
+  if (isRegenerating) {
+    return res.status(409).json({ error: 'Regeneration already in progress' });
+  }
   try {
+    isRegenerating = true;
+    regenerationComplete = false;
+
     // Discard old trees
     merkleTrees = {};
     rootHashes = {};
@@ -108,10 +114,13 @@ app.post('/regenerate-trees', async (req, res) => {
     merkleTrees = result.merkleTrees;
     rootHashes = result.rootHashes;
 
+    regenerationComplete = true;
     res.json({ message: 'Merkle trees regenerated successfully', rootHashes });
   } catch (error) {
     console.error('Error regenerating Merkle trees:', error);
     res.status(500).json({ error: 'Failed to regenerate Merkle trees' });
+  } finally {
+    isRegenerating = false;
   }
 });
 
