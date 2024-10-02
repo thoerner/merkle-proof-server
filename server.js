@@ -1,16 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { Worker } = require('worker_threads');
 const { MerkleTree } = require('merkletreejs');
 const { keccak256 } = require('ethereumjs-util');
 const { PrismaClient } = require('@prisma/client');
 const { ethers } = require('ethers');
-const fs = require('fs').promises;
-const zlib = require('zlib');
-const util = require('util');
-
-const gunzip = util.promisify(zlib.gunzip);
+const net = require('net');
 
 const app = express();
 const prisma = new PrismaClient({
@@ -23,10 +18,8 @@ const PORT = process.env.PORT || 3000;
 
 let merkleTrees = {};
 let rootHashes = {};
-let merkleTreePaths = {};
 let regenerationComplete = false;
 let isRegenerating = false;
-let regenerationWorker = null;
 
 function hashToken(token, citizenId) {
   return ethers.keccak256(
@@ -37,49 +30,65 @@ function hashToken(token, citizenId) {
   );
 }
 
-async function loadMerkleTrees() {
-  for (const chain of Object.keys(merkleTreePaths)) {
-    console.log(`Loading Merkle tree for ${chain}...`);
-    const compressedData = await fs.readFile(merkleTreePaths[chain]);
-    const decompressedData = await gunzip(compressedData);
-    const treeData = JSON.parse(decompressedData.toString());
-    merkleTrees[chain] = new MerkleTree(treeData.leaves, keccak256, treeData.options);
-    console.log(`Merkle tree for ${chain} loaded into memory.`);
-  }
-}
+async function generateMerkleTreesByChain() {
+  console.log('Starting Merkle tree generation for each chain...');
+  const CHAINS = ['ETH', 'ARB', 'BASE', 'POL', 'AVAX'];
+  const merkleTrees = {};
+  const rootHashes = {};
 
-async function generateInitialMerkleTrees() {
-  console.log('Starting initial Merkle tree generation...');
-  
-  return new Promise((resolve, reject) => {
-    const initialGenerationWorker = new Worker('./initialGenerationWorker.js');
-    
-    initialGenerationWorker.on('message', async (message) => {
-      if (message.type === 'complete') {
-        console.log('Initial Merkle tree generation completed');
-        merkleTreePaths = message.merkleTreePaths;
-        rootHashes = message.rootHashes;
-        
-        await loadMerkleTrees();
-        
-        regenerationComplete = true;
-        resolve();
-      } else if (message.type === 'progress') {
-        console.log(`Initial generation progress: Overall ${message.progress.overall}%, Current Chain: ${message.progress.currentChain} (${message.progress.chainProgress[message.progress.currentChain]}%)%, Chains Completed: ${message.progress.chainsCompleted}`);
+  await Promise.all(CHAINS.map(async (chain) => {
+    console.log(`Generating Merkle tree for chain: ${chain}`);
+    const batchSize = 100000; // Increased batch size
+    let lastId = 0;
+    let processedCount = 0;
+    const totalTokens = await prisma.citizenTokens.count({
+      where: { chain },
+    });
+    console.log(`Total tokens for ${chain}: ${totalTokens}`);
+
+    const treeBuilder = new MerkleTree([], keccak256, { sortPairs: true });
+
+    while (processedCount < totalTokens) {
+      const tokens = await prisma.citizenTokens.findMany({
+        take: batchSize,
+        where: {
+          id: { gt: lastId },
+          chain: chain,
+        },
+        select: { id: true, token: true, citizenId: true },
+        orderBy: { id: 'asc' },
+      });
+
+      if (tokens.length === 0) break;
+
+      const leaves = tokens.map((token) =>
+        hashToken(token.token.toString(), token.citizenId.toString())
+      );
+
+      treeBuilder.addLeaves(leaves);
+
+      processedCount += tokens.length;
+      lastId = tokens[tokens.length - 1].id;
+
+      console.log(
+        `Processed ${processedCount}/${totalTokens} tokens for ${chain}.`
+      );
+
+      // Force garbage collection if available
+      if (global.gc) {
+        global.gc();
       }
-    });
+    }
 
-    initialGenerationWorker.on('error', (error) => {
-      console.error('Error in initial generation worker:', error);
-      reject(error);
-    });
+    const rootHash = treeBuilder.getHexRoot();
 
-    initialGenerationWorker.on('exit', (code) => {
-      if (code !== 0) {
-        reject(new Error(`Initial generation worker stopped with exit code ${code}`));
-      }
-    });
-  });
+    merkleTrees[chain] = treeBuilder;
+    rootHashes[chain] = rootHash;
+
+    console.log(`Merkle tree for ${chain} generated. Root hash: ${rootHash}`);
+  }));
+
+  return { merkleTrees, rootHashes };
 }
 
 app.post('/regenerate-trees', async (req, res) => {
@@ -88,58 +97,55 @@ app.post('/regenerate-trees', async (req, res) => {
     console.log('Regeneration already in progress');
     return res.status(409).json({ error: 'Regeneration already in progress' });
   }
-  
-  isRegenerating = true;
-  regenerationComplete = false;
-
-  // Respond immediately
-  res.json({ message: 'Merkle tree regeneration initiated' });
-
-  // Start regeneration in a separate worker thread
-  regenerationWorker = new Worker('./regenerationWorker.js');
-  
-  regenerationWorker.on('message', async (message) => {
-    if (message.type === 'complete') {
-      console.log('Merkle tree regeneration completed');
-      merkleTreePaths = message.merkleTreePaths;
-      rootHashes = message.rootHashes;
-      
-      // Load new Merkle trees into memory
-      await loadMerkleTrees();
-      
-      regenerationComplete = true;
-      isRegenerating = false;
-    } else if (message.type === 'progress') {
-      console.log(`Regeneration progress: Overall ${message.progress.overall}%, Current Chain: ${message.progress.currentChain} (${message.progress.chainProgress[message.progress.currentChain]}%), Chains Completed: ${message.progress.chainsCompleted}`);
-    }
-  });
-
-  regenerationWorker.on('error', (error) => {
-    console.error('Error in regeneration worker:', error);
-    isRegenerating = false;
+  try {
+    console.log('Regeneration started');
+    isRegenerating = true;
     regenerationComplete = false;
-  });
 
-  regenerationWorker.on('exit', (code) => {
-    if (code !== 0) {
-      console.error(`Regeneration worker stopped with exit code ${code}`);
-      isRegenerating = false;
-      regenerationComplete = false;
+    // Discard old trees
+    merkleTrees = {};
+    rootHashes = {};
+
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
     }
-  });
+
+    // Generate new trees
+    const result = await generateMerkleTreesByChain();
+    merkleTrees = result.merkleTrees;
+    rootHashes = result.rootHashes;
+
+    regenerationComplete = true;
+    res.json({ message: 'Merkle trees regenerated successfully', rootHashes });
+  } catch (error) {
+    console.error('Error regenerating Merkle trees:', error);
+    res.status(500).json({ error: 'Failed to regenerate Merkle trees' });
+  } finally {
+    isRegenerating = false;
+  }
 });
 
-app.get('/proof/:chain/:citizenId/:token', (req, res) => {
+app.get('/proof/:chain/:citizenId/:token', async (req, res) => {
   const { chain, citizenId, token } = req.params;
-  
-  if (!merkleTrees[chain]) {
-    return res.status(400).json({ error: 'Invalid chain or Merkle tree not loaded' });
+
+  const correctedChain = chain === "TEST" ? "POL" : chain;
+
+  if (!merkleTrees[correctedChain]) {
+    return res.status(400).json({ error: `Invalid or unsupported chain: ${chain}` });
   }
 
+  const merkleTree = merkleTrees[correctedChain];
+  const rootHash = rootHashes[correctedChain];
+
   const leaf = hashToken(token, citizenId);
-  const proof = merkleTrees[chain].getHexProof(leaf);
-  
-  res.json({ proof });
+  const proof = merkleTree.getHexProof(leaf);
+
+  res.json({
+    token,
+    merkleProof: proof,
+    rootHash,
+  });
 });
 
 app.get('/rootHash/:chain', (req, res) => {
@@ -153,28 +159,7 @@ app.get('/rootHash/:chain', (req, res) => {
 });
 
 app.get('/regeneration-status', (req, res) => {
-  if (regenerationWorker) {
-    regenerationWorker.postMessage({ type: 'getProgress' });
-    regenerationWorker.once('message', (message) => {
-      if (message.type === 'progress') {
-        res.json({
-          isComplete: regenerationComplete,
-          overall: message.progress.overall,
-          currentChain: message.progress.currentChain,
-          chainsCompleted: message.progress.chainsCompleted,
-          chainProgress: message.progress.chainProgress
-        });
-      }
-    });
-  } else {
-    res.json({
-      isComplete: regenerationComplete,
-      overall: 0,
-      currentChain: '',
-      chainsCompleted: 0,
-      chainProgress: {}
-    });
-  }
+  res.json({ isComplete: regenerationComplete });
 });
 
 app.get('/root-hashes', (req, res) => {
@@ -188,11 +173,33 @@ app.get('/', (req, res) => {
   res.json({ status: 'OK', message: 'Server is healthy' });
 });
 
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      resolve(false);
+    });
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+    server.listen(port);
+  });
+}
+
 async function startServer() {
   const startTime = Date.now();
   try {
+    console.log('Checking if port is available...');
+    const portAvailable = await isPortAvailable(PORT);
+    if (!portAvailable) {
+      throw new Error(`Port ${PORT} is not available. Please choose a different port.`);
+    }
+
     console.log('Starting server initialization...');
-    await generateInitialMerkleTrees();
+    const { merkleTrees: generatedMerkleTrees, rootHashes: generatedRootHashes } = await generateMerkleTreesByChain();
+    merkleTrees = generatedMerkleTrees;
+    rootHashes = generatedRootHashes;
     app.listen(PORT, () => {
       const endTime = Date.now();
       const startupTime = (endTime - startTime) / 60000; // Convert to minutes
