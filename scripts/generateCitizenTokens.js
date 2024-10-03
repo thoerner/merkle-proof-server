@@ -5,7 +5,7 @@ const crypto = require('crypto');
 
 const prisma = new PrismaClient();
 
-const CHAINS = ['ETH', 'ARB', 'BASE', 'POL', 'AVAX'];
+const CHAINS = ['ETH', 'ARB', 'BASE', 'POL'];
 const TOKENS_PER_CHAIN = 100;
 
 function generateRandomInteger() {
